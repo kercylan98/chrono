@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+var defaultWakeupCancel = func() {}
+
 const (
 	delayQueueSleeping = iota
 	delayQueueWorking
@@ -18,7 +20,7 @@ func New[T QueueItem](size int, timeGetter func() int64, handler func(v T)) *Del
 		priorityQueue: newPriorityQueue[T](size),
 		timeGetter:    timeGetter,
 		handler:       handler,
-		wakeupCancel:  func() {},
+		wakeupCancel:  defaultWakeupCancel,
 	}
 }
 

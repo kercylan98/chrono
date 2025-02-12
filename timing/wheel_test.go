@@ -1,13 +1,13 @@
-package chrono_test
+package timing_test
 
 import (
-	chrono "github.com/kercylan98/chrono/src"
+	"github.com/kercylan98/chrono/timing"
 	"testing"
 	"time"
 )
 
-func TestTimingWheel_AfterFunc(t *testing.T) {
-	tw := chrono.NewTimingWheel()
+func TestWheel_AfterFunc(t *testing.T) {
+	tw := timing.New()
 
 	durations := []time.Duration{
 		1 * time.Millisecond,

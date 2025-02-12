@@ -1,4 +1,4 @@
-package chrono
+package timing
 
 import (
 	"container/list"
@@ -40,11 +40,11 @@ func (t *timerImpl) getExpiration() int64 {
 }
 
 func (t *timerImpl) Stop() bool {
-	stopped := false
-	for b := t.getBucket(); b != nil; b = t.getBucket() {
-		stopped = b.remove(t)
+	bucket := t.getBucket()
+	if bucket != nil {
+		return bucket.remove(t)
 	}
-	return stopped
+	return false
 }
 
 func (t *timerImpl) getTask() func() {

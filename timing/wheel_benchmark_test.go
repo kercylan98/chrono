@@ -1,7 +1,7 @@
-package chrono_test
+package timing_test
 
 import (
-	chrono "github.com/kercylan98/chrono/src"
+	"github.com/kercylan98/chrono/timing"
 	"testing"
 	"time"
 )
@@ -10,8 +10,8 @@ func genD(i int) time.Duration {
 	return time.Duration(i%10000) * time.Millisecond
 }
 
-func BenchmarkTimingWheel_AfterFunc(b *testing.B) {
-	tw := chrono.NewTimingWheel()
+func BenchmarkWheel_AfterFunc(b *testing.B) {
+	tw := timing.New()
 
 	cases := []struct {
 		name string
@@ -23,10 +23,11 @@ func BenchmarkTimingWheel_AfterFunc(b *testing.B) {
 	}
 	for _, c := range cases {
 		b.Run(c.name, func(b *testing.B) {
-			base := make([]chrono.Timer, c.N)
+			base := make([]timing.Timer, c.N)
 			for i := 0; i < len(base); i++ {
 				base[i] = tw.AfterFunc(genD(i), func() {})
 			}
+			b.ReportAllocs()
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {

@@ -1,4 +1,4 @@
-package chrono
+package timing
 
 import "time"
 

@@ -1,8 +1,8 @@
-package chrono
+package timing
 
 import (
 	"container/list"
-	"github.com/kercylan98/chrono/src/internal/delayqueue"
+	"github.com/kercylan98/chrono/timing/internal/delayqueue"
 	"sync"
 	"sync/atomic"
 )
@@ -11,7 +11,7 @@ var (
 	_ bucket = (*bucketImpl)(nil)
 )
 
-func newBucket(wheel TimingWheel) bucket {
+func newBucket(wheel Wheel) bucket {
 	return &bucketImpl{
 		wheel:  wheel,
 		timers: list.New(),
@@ -31,9 +31,6 @@ type bucket interface {
 	// add 添加一个计时器到计时桶中
 	add(timer Timer)
 
-	// unlockedAdd 添加一个计时器到计时桶中，该函数不会加锁
-	unlockedAdd(timer Timer)
-
 	// remove 从计时桶中移除一个计时器，如果计时器不在计时桶中则返回 false
 	remove(Timer) bool
 
@@ -45,7 +42,7 @@ type bucketImpl struct {
 	expiration atomic.Int64
 	timers     *list.List
 	rw         sync.RWMutex
-	wheel      TimingWheel // 所属时间轮
+	wheel      Wheel // 所属时间轮
 }
 
 func (b *bucketImpl) Size() int {
@@ -70,27 +67,18 @@ func (b *bucketImpl) add(timer Timer) {
 	timer.setBucket(b, e)
 }
 
-func (b *bucketImpl) unlockedAdd(timer Timer) {
-	e := b.timers.PushBack(timer)
-	timer.setBucket(b, e)
-}
-
-func (b *bucketImpl) unlockedRemove(t Timer) bool {
+func (b *bucketImpl) remove(t Timer) bool {
 	if t.getBucket() != b {
 		return false
 	}
 
+	b.rw.Lock()
 	b.timers.Remove(t.getElement())
+	defer b.rw.Unlock()
 
 	t.setBucket(nil, nil)
 	b.wheel.refreshDelayQueue()
 	return true
-}
-
-func (b *bucketImpl) remove(t Timer) bool {
-	b.rw.Lock()
-	defer b.rw.Unlock()
-	return b.unlockedRemove(t)
 }
 
 func (b *bucketImpl) flush(adder func(Timer)) {
@@ -102,13 +90,15 @@ func (b *bucketImpl) flush(adder func(Timer)) {
 		next := e.Next()
 
 		t := e.Value.(Timer)
-		b.unlockedRemove(t)
+		b.timers.Remove(e)
+		t.setBucket(nil, nil)
 
 		// 添加到时间轮中时，如果任务时间已经到达，将被执行
-		adder(t)
+		go adder(t)
 
 		e = next
 	}
 
 	b.setExpiration(-1)
+	b.wheel.refreshDelayQueue()
 }
