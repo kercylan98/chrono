@@ -1,0 +1,154 @@
+package chrono
+
+import (
+	"github.com/kercylan98/chrono/src/internal/delayqueue"
+	"sync"
+	"sync/atomic"
+	"time"
+)
+
+var (
+	_ TimingWheel = (*timingWheel)(nil)
+)
+
+func newTimingWheelInternal(tw TimingWheel, config TimingWheelOptionsFetcher) timingWheelInternal {
+	return &timingWheelInternalImpl{
+		TimingWheel: tw,
+		config:      config,
+	}
+}
+
+type timingWheelInternal interface {
+	// init 初始化时间轮
+	init(startMs int64, queue *delayqueue.DelayQueue[bucket])
+
+	// getConfig 获取时间轮的配置
+	getConfig() TimingWheelOptionsFetcher
+
+	// add 添加一个计时器
+	add(timer Timer, lock bool) bool
+
+	// advanceClock 推进时间轮的时间
+	advanceClock(expiration int64)
+
+	// contract 履行任务
+	contract(timer Timer)
+
+	// unlockContract 履行任务，该函数不会加锁
+	unlockContract(timer Timer)
+
+	// refreshDelayQueue 刷新延迟队列，避免长时间无效挂起
+	refreshDelayQueue()
+}
+
+type timingWheelInternalImpl struct {
+	TimingWheel
+	config       TimingWheelOptionsFetcher
+	current      atomic.Int64 // 毫秒级当前时间
+	interval     int64        // 时间轮的间隔时间
+	overflow     TimingWheel  // 溢出轮
+	overflowLock sync.RWMutex
+	buckets      []bucket                       // 时间轮的桶
+	queue        *delayqueue.DelayQueue[bucket] // 延迟队列
+}
+
+func (t *timingWheelInternalImpl) init(startMs int64, queue *delayqueue.DelayQueue[bucket]) {
+	if startMs == 0 {
+		startMs = ToMillisecond(time.Now())
+	}
+	tick := t.getConfig().FetchTick()
+	size := t.getConfig().FetchSize()
+
+	t.current.Store(Truncate(startMs, tick))
+	t.interval = tick * size
+	t.buckets = make([]bucket, size)
+
+	if queue == nil {
+		queue = delayqueue.New(int(size), func() int64 {
+			return ToMillisecond(time.Now())
+		}, func(bucket bucket) {
+			t.advanceClock(bucket.getExpiration())
+			bucket.flush(t.unlockContract)
+		})
+	}
+	t.queue = queue
+
+	for i := range t.buckets {
+		t.buckets[i] = newBucket(t)
+	}
+}
+
+func (t *timingWheelInternalImpl) getConfig() TimingWheelOptionsFetcher {
+	return t.config
+}
+
+func (t *timingWheelInternalImpl) contract(timer Timer) {
+	if !t.add(timer, true) {
+		// 计时器已经过期，直接执行
+		go t.getConfig().FetchExecutor().Execute(timer.getTask())
+	}
+}
+
+func (t *timingWheelInternalImpl) unlockContract(timer Timer) {
+	if !t.add(timer, false) {
+		// 计时器已经过期，直接执行
+		t.getConfig().FetchExecutor().Execute(timer.getTask())
+	}
+}
+
+func (t *timingWheelInternalImpl) add(timer Timer, lock bool) bool {
+	// 获取时间轮当前时间和下一个刻度时间，以及待添加的计时器的到期时间
+	current := t.current.Load()
+	tick := t.getConfig().FetchTick()
+	expiration := timer.getExpiration()
+	if expiration < current+tick {
+		// 计时器已经过期
+		return false
+	} else if expiration < current+t.interval {
+		// 计算计时器位于时间轮的哪个刻度，然后获取对应的桶
+		b := t.buckets[expiration/tick%t.getConfig().FetchSize()]
+		if lock {
+			b.add(timer)
+		} else {
+			b.unlockedAdd(timer)
+		}
+		if b.setExpiration(expiration) {
+			// 如果桶的过期时间发生变化，需要重新调度桶
+			t.queue.Add(b, b.getExpiration())
+		}
+		return true
+	} else {
+		// 超出区间。将其放入溢流轮中
+		t.overflowLock.Lock()
+		defer t.overflowLock.Unlock()
+		if t.overflow == nil {
+			config := NewTimingWheelConfig().
+				WithTick(time.Duration(t.interval) * time.Millisecond).
+				WithSize(int(t.getConfig().FetchSize())).
+				WithExecutor(t.getConfig().FetchExecutor())
+			t.overflow = GetTimingWheelBuilder().build(current, t.queue, config)
+		}
+		return t.overflow.add(timer, lock)
+	}
+}
+
+func (t *timingWheelInternalImpl) advanceClock(expiration int64) {
+	currentTime := t.current.Load()
+	tick := t.getConfig().FetchTick()
+	if expiration >= currentTime+tick {
+		// 当给定的时间超出当前时间轮的间隔时推进时间轮的时间
+		currentTime = Truncate(expiration, tick)
+		t.current.Store(currentTime)
+
+		// 如果溢出时间轮存在，则同时推进溢出时间轮的时间
+		t.overflowLock.RLock()
+		defer t.overflowLock.RUnlock()
+		if t.overflow != nil {
+			t.overflow.advanceClock(currentTime)
+		}
+	}
+}
+
+func (t *timingWheelInternalImpl) refreshDelayQueue() {
+	t.queue.Refresh()
+}
