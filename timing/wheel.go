@@ -1,6 +1,8 @@
 package timing
 
 import (
+	"github.com/gorhill/cronexpr"
+	"github.com/kercylan98/chrono"
 	"github.com/kercylan98/chrono/timing/internal/delayqueue"
 	"time"
 )
@@ -72,8 +74,15 @@ func (builder *Builder) FromConfigurators(configurators ...Configurator) Wheel {
 type Wheel interface {
 	wheelInternal
 
-	// AfterFunc 创建一个在一段时间后执行的任务
-	AfterFunc(duration time.Duration, task func()) Timer
+	// After 创建一个在一段时间后执行的任务
+	After(duration time.Duration, task Task) Timer
+
+	// Loop 创建一个循环执行的任务，它将在 duration 时间后首次执行，然后根据 LoopTask.Next 方法返回的时间再次执行
+	Loop(duration time.Duration, task LoopTask) Timer
+
+	// Cron 通过 cron 表达式创建一个任务，当表达式无效时将返回错误
+	//  - 表达式说明可参阅：https://github.com/gorhill/cronexpr
+	Cron(cron string, task Task) (Timer, error)
 }
 
 // wheel 是 Wheel 的默认实现
@@ -81,8 +90,46 @@ type wheel struct {
 	wheelInternal
 }
 
-func (t *wheel) AfterFunc(duration time.Duration, task func()) Timer {
-	timer := newTimer(ToMillisecond(time.Now().Add(duration)), task)
+func (t *wheel) After(duration time.Duration, task Task) Timer {
+	timer := newTimer(chrono.TimeToMillisecond(time.Now().Add(duration)), task.Execute)
 	t.contract(timer)
 	return timer
+}
+
+func (t *wheel) Loop(duration time.Duration, task LoopTask) Timer {
+	var timer Timer
+	timer = newTimer(chrono.TimeToMillisecond(time.Now().Add(duration)), func() {
+		defer func() {
+			previous := chrono.MillisecondToTime(timer.getExpiration())
+			next := task.Next(previous)
+			if !next.IsZero() && next.After(previous) {
+				timer.setExpiration(chrono.TimeToMillisecond(next))
+				t.contract(timer)
+			}
+		}()
+
+		task.Execute()
+	})
+	t.contract(timer)
+	return timer
+}
+
+func (t *wheel) Cron(cron string, task Task) (Timer, error) {
+	expression, err := cronexpr.Parse(cron)
+	if err != nil {
+		return nil, err
+	}
+	var now = time.Now()
+	var timer Timer
+	timer = newTimer(chrono.TimeToMillisecond(expression.Next(now)), func() {
+		defer func() {
+			next := expression.Next(now)
+			timer.setExpiration(chrono.TimeToMillisecond(next))
+			t.contract(timer)
+		}()
+
+		task.Execute()
+	})
+	t.contract(timer)
+	return timer, nil
 }

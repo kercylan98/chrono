@@ -12,6 +12,8 @@ type Timer interface {
 
 	getExpiration() int64
 
+	setExpiration(millisecond int64)
+
 	getTask() func()
 
 	getBucket() bucket
@@ -37,6 +39,10 @@ type timerImpl struct {
 
 func (t *timerImpl) getExpiration() int64 {
 	return t.expiration
+}
+
+func (t *timerImpl) setExpiration(millisecond int64) {
+	t.expiration = millisecond
 }
 
 func (t *timerImpl) Stop() bool {

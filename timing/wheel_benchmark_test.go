@@ -25,13 +25,13 @@ func BenchmarkWheel_AfterFunc(b *testing.B) {
 		b.Run(c.name, func(b *testing.B) {
 			base := make([]timing.Timer, c.N)
 			for i := 0; i < len(base); i++ {
-				base[i] = tw.AfterFunc(genD(i), func() {})
+				base[i] = tw.After(genD(i), timing.TaskFn(func() {}))
 			}
 			b.ReportAllocs()
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
-				tw.AfterFunc(time.Second, func() {}).Stop()
+				tw.After(time.Second, timing.TaskFn(func() {})).Stop()
 			}
 
 			b.StopTimer()

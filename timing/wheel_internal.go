@@ -1,6 +1,7 @@
 package timing
 
 import (
+	"github.com/kercylan98/chrono"
 	"github.com/kercylan98/chrono/timing/internal/delayqueue"
 	"sync"
 	"sync/atomic"
@@ -51,18 +52,18 @@ type wheelInternalImpl struct {
 
 func (t *wheelInternalImpl) init(startMs int64, queue *delayqueue.DelayQueue[bucket]) {
 	if startMs == 0 {
-		startMs = ToMillisecond(time.Now())
+		startMs = chrono.TimeToMillisecond(time.Now())
 	}
 	tick := t.getConfig().FetchTick()
 	size := t.getConfig().FetchSize()
 
-	t.current = Truncate(startMs, tick)
+	t.current = chrono.Truncate(startMs, tick)
 	t.interval = tick * size
 	t.buckets = make([]bucket, size)
 
 	if queue == nil {
 		queue = delayqueue.New(int(size), func() int64 {
-			return ToMillisecond(time.Now())
+			return chrono.TimeToMillisecond(time.Now())
 		}, func(bucket bucket) {
 			t.advanceClock(bucket.getExpiration())
 			bucket.flush(t.contract)
@@ -123,7 +124,7 @@ func (t *wheelInternalImpl) advanceClock(expiration int64) {
 	tick := t.getConfig().FetchTick()
 	if expiration >= currentTime+tick {
 		// 当给定的时间超出当前时间轮的间隔时推进时间轮的时间
-		currentTime = Truncate(expiration, tick)
+		currentTime = chrono.Truncate(expiration, tick)
 		atomic.StoreInt64(&t.current, currentTime)
 
 		// 如果溢出时间轮存在，则同时推进溢出时间轮的时间
