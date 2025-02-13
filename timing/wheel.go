@@ -4,6 +4,7 @@ import (
 	"github.com/gorhill/cronexpr"
 	"github.com/kercylan98/chrono"
 	"github.com/kercylan98/chrono/timing/internal/delayqueue"
+	"sync"
 	"time"
 )
 
@@ -83,11 +84,17 @@ type Wheel interface {
 	// Cron 通过 cron 表达式创建一个任务，当表达式无效时将返回错误
 	//  - 表达式说明可参阅：https://github.com/gorhill/cronexpr
 	Cron(cron string, task Task) (Timer, error)
+
+	// Named 获取使用命名维护任务的时间轮 API
+	//   - 当 topic 不为空时，将返回一个命名空间为 topic 的 Named 实例，不同的 Named 实例之间的任务不会相互影响
+	Named(topic ...string) Named
 }
 
 // wheel 是 Wheel 的默认实现
 type wheel struct {
 	wheelInternal
+	named map[string]Named
+	rw    sync.RWMutex
 }
 
 func (t *wheel) After(duration time.Duration, task Task) Timer {
@@ -132,4 +139,24 @@ func (t *wheel) Cron(cron string, task Task) (Timer, error) {
 	})
 	t.contract(timer)
 	return timer, nil
+}
+
+func (t *wheel) Named(topic ...string) Named {
+	t.rw.Lock()
+	defer t.rw.Unlock()
+	var name string
+	if len(topic) > 0 {
+		name = topic[0]
+	}
+	if t.named == nil {
+		t.named = make(map[string]Named)
+	}
+
+	if named, exist := t.named[name]; exist {
+		return named
+	} else {
+		named = newNamed(t)
+		t.named[name] = named
+		return named
+	}
 }
