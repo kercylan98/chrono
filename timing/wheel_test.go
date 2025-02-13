@@ -7,6 +7,19 @@ import (
 	"time"
 )
 
+func TestWheel_LoopStop(t *testing.T) {
+	tw := timing.New().Named()
+	var i int
+	tw.Loop("test", 0, timing.NewForeverLoopTask(time.Second, timing.TaskFn(func() {
+		i++
+		if i == 3 {
+			tw.Stop("test")
+		}
+		t.Log(i)
+	})))
+	time.Sleep(time.Second * 5)
+}
+
 func TestWheel_Loop(t *testing.T) {
 	var tests = []struct {
 		name     string

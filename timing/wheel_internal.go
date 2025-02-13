@@ -81,6 +81,9 @@ func (t *wheelInternalImpl) getConfig() OptionsFetcher {
 }
 
 func (t *wheelInternalImpl) contract(timer Timer) {
+	if timer.Stopped() {
+		return
+	}
 	if !t.add(timer) {
 		// 计时器已经过期，直接执行
 		go t.getConfig().FetchExecutor().Execute(timer.getTask())
