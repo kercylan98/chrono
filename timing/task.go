@@ -24,12 +24,18 @@ type LoopTask interface {
 }
 
 // NewLoopTask 创建一个循环任务，它将根据 interval 作为间隔时间反复执行最多 times 次
+//   - 当 times 的值为 0 时，任务将不会被执行，如果 times 的值为负数，那么任务将永远不会停止，除非主动停止
 func NewLoopTask(interval time.Duration, times int, task Task) LoopTask {
 	return &loopTask{
 		interval: interval,
 		times:    times,
 		task:     task,
 	}
+}
+
+// NewForeverLoopTask 创建一个永久循环任务，它将根据 interval 作为间隔时间无限循环执行
+func NewForeverLoopTask(interval time.Duration, task Task) LoopTask {
+	return NewLoopTask(interval, -1, task)
 }
 
 type loopTask struct {
@@ -39,13 +45,18 @@ type loopTask struct {
 }
 
 func (f *loopTask) Next(previous time.Time) time.Time {
-	if f.times <= 0 {
+	if f.times == 0 {
 		return time.Time{}
 	}
 	return previous.Add(f.interval)
 }
 
 func (f *loopTask) Execute() {
+	if f.times == 0 {
+		return
+	}
 	f.task.Execute()
-	f.times--
+	if f.times > 0 {
+		f.times--
+	}
 }
